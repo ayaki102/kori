@@ -9,8 +9,8 @@
             "name": "PlatformIO",
             "includePath": [
                 "/home/itz_4ura/tools/kori/src",
-                "/home/itz_4ura/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                 "/home/itz_4ura/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src",
+                "/home/itz_4ura/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                 "/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-stamps3/M5Cardputer/src",
                 "/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-stamps3/IRremote/src",
                 "/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-stamps3/M5Unified/src",
@@ -252,8 +252,8 @@
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
                     "/home/itz_4ura/tools/kori/src",
-                    "/home/itz_4ura/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                     "/home/itz_4ura/.platformio/packages/framework-arduinoespressif32/libraries/BLE/src",
+                    "/home/itz_4ura/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                     "/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-stamps3/M5Cardputer/src",
                     "/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-stamps3/IRremote/src",
                     "/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-stamps3/M5Unified/src",
