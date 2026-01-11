@@ -1,0 +1,9 @@
+CompileFlags:
+  Add:
+    - "-I/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-cardputer/M5Cardputer/src"
+    - "-I/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-cardputer/M5GFX/src"
+    - "-I/home/itz_4ura/tools/kori/.pio/libdeps/m5stack-cardputer/M5Unified/src"
+    - "-I~/.platformio/packages/framework-arduinoespressif32/cores/esp32"
+    - "-I~/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include"
+    - "-DARDUINO"
+    - "-DESP32"
