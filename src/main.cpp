@@ -5,17 +5,22 @@
 #include "WiFi.h"
 #include "esp_wifi.h"
 #include "globals.h"
+#include "menu_system.h"
 #include "ui.h"
+#include "utils.h"
 
-void handleSubmenu();
 void handleMenu();
 void handleWiFiScan();
+void handleBLEScan();
 void handleOptions();
-void resetWiFiScanState();
 
-int currNetwork = 0;
-bool scanned = false;
-int n = 0;
+// WiFi scanning globals
+ScrollableList *wifiList = nullptr;
+bool wifiScanInProgress = false;
+
+// BLE scanning globals (for future use)
+ScrollableList *bleList = nullptr;
+bool bleScanInProgress = false;
 
 void setup() {
   auto cfg = M5.config();
@@ -46,7 +51,17 @@ void loop() {
     if (!isInSubMenu) {
       handleMenu();
     } else {
-      handleSubmenu();
+      // Handle submenu navigation based on selected item
+      if (isKeyPressed(KEY_BACKSPACE)) {
+        isInSubMenu = false;
+        drawMenu();
+      } else if (selectedItem == MenuItem::WIFI_SCAN) {
+        handleWiFiScan();
+      } else if (selectedItem == MenuItem::BLE_SCAN) {
+        handleBLEScan();
+      } else if (selectedItem == MenuItem::OPTIONS) {
+        handleOptions();
+      }
     }
   }
 
@@ -60,7 +75,7 @@ void loop() {
 }
 
 void handleMenu() {
-  if (Cardputer.Keyboard.isKeyPressed('/')) {
+  if (isKeyPressed('/')) {
     selectedItem++;
     if (selectedItem >= lenMenuItems) {
       selectedItem = 0;
@@ -68,7 +83,7 @@ void handleMenu() {
     updateLineTarget(menuItems[selectedItem]);
     drawMenu();
   }
-  if (Cardputer.Keyboard.isKeyPressed(',')) {
+  if (isKeyPressed(',')) {
     selectedItem--;
     if (selectedItem < 0) {
       selectedItem = lenMenuItems - 1;
@@ -76,158 +91,140 @@ void handleMenu() {
     updateLineTarget(menuItems[selectedItem]);
     drawMenu();
   }
-  if (Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
+  if (isKeyPressed(KEY_ENTER)) {
     isInSubMenu = true;
 
     if (selectedItem == MenuItem::WIFI_SCAN) {
+      // Initialize WiFi list if needed
+      if (wifiList == nullptr) {
+        wifiList = new ScrollableList("Scanning WiFi...", "Selected Network",
+                                      "No networks found", "[r]escan  [e]xit");
+      }
+      wifiList->reset();
+      wifiScanInProgress = false;
       handleWiFiScan();
+    } else if (selectedItem == MenuItem::BLE_SCAN) {
+      // Initialize BLE list if needed
+      if (bleList == nullptr) {
+        bleList = new ScrollableList("Scanning BLE...", "Selected Device",
+                                     "No devices found", "[r]escan  [e]xit");
+      }
+      bleList->reset();
+      bleScanInProgress = false;
+      handleBLEScan();
     } else if (selectedItem == MenuItem::OPTIONS) {
       handleOptions();
     }
   }
 }
 
-void handleSubmenu() {
-  if (Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE)) {
+void handleWiFiScan() {
+  if (wifiList == nullptr)
+    return;
+
+  // Handle scanning state
+  if (wifiList->getState() == LIST_SCANNING && !wifiScanInProgress) {
+    wifiList->drawScanning();
+
+    // Perform the actual WiFi scan
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
+    int n = WiFi.scanNetworks(false, true);
+
+    // Create list items from scan results
+    ListItem *items = new ListItem[n];
+    for (int i = 0; i < n; i++) {
+      items[i].mainText = WiFi.SSID(i);
+      items[i].mainColor = TFT_WHITE;
+
+      // Signal strength
+      items[i].subText1 = String(WiFi.RSSI(i)) + " dBm";
+      items[i].subColor1 = TFT_CYAN;
+
+      // Security type
+      wifi_auth_mode_t encryption = WiFi.encryptionType(i);
+      if (encryption == WIFI_AUTH_OPEN) {
+        items[i].subText2 = "Open";
+      } else if (encryption == WIFI_AUTH_WEP) {
+        items[i].subText2 = "WEP";
+      } else if (encryption == WIFI_AUTH_WPA_PSK) {
+        items[i].subText2 = "WPA";
+      } else if (encryption == WIFI_AUTH_WPA2_PSK) {
+        items[i].subText2 = "WPA2";
+      } else if (encryption == WIFI_AUTH_WPA_WPA2_PSK) {
+        items[i].subText2 = "WPA/WPA2";
+      } else {
+        items[i].subText2 = "WPA3";
+      }
+      items[i].subColor2 = TFT_MAGENTA;
+    }
+
+    wifiList->setBrowsing(items, n);
+    wifiScanInProgress = true;
+    return;
+  }
+
+  // Handle input and check for exit
+  if (wifiList->handleInput()) {
     isInSubMenu = false;
-    resetWiFiScanState();
     drawMenu();
     return;
   }
 
-  if (selectedItem == MenuItem::WIFI_SCAN) {
-    handleWiFiScan();
-  } else if (selectedItem == MenuItem::DEAUTH) {
-    // handleDeauth();
-  } else if (selectedItem == MenuItem::BLE_SCAN) {
-    // handleBLEScan();
-  } else if (selectedItem == MenuItem::OPTIONS) {
-    handleOptions();
-  }
+  // Draw current state
+  wifiList->draw();
 }
 
-void handleWiFiScan() {
-  static bool needsRedraw = true;
-  int w = Cardputer.Display.width();
-  int h = Cardputer.Display.height();
+void handleBLEScan() {
+  if (bleList == nullptr)
+    return;
 
-  if (!scanned) {
-    clearScrn();
-    Cardputer.Display.setTextColor(TFT_WHITE);
-    Cardputer.Display.setTextDatum(MC_DATUM);
-    for (int i = 0; i < 3; ++i) {
-      clearScrn();
-      String dots = "";
-      for (int j = 0; j <= i; j++) {
-        dots += ".";
-      }
-      Cardputer.Display.drawString("Scanning" + dots, w / 2, h / 2);
-      delay(300);
-    }
+  // Handle scanning state
+  if (bleList->getState() == LIST_SCANNING && !bleScanInProgress) {
+    bleList->drawScanning();
 
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(100);
-    n = WiFi.scanNetworks(false, true);
-    scanned = true;
-    needsRedraw = true;
+    // TODO: Perform the actual BLE scan
+    // For now, just create dummy data as an example
+    ListItem *items = new ListItem[3];
+
+    items[0].mainText = "BLE Device 1";
+    items[0].mainColor = TFT_WHITE;
+    items[0].subText1 = "-45 dBm";
+    items[0].subColor1 = TFT_CYAN;
+    items[0].subText2 = "AA:BB:CC:DD:EE:FF";
+    items[0].subColor2 = TFT_MAGENTA;
+
+    items[1].mainText = "BLE Device 2";
+    items[1].mainColor = TFT_WHITE;
+    items[1].subText1 = "-67 dBm";
+    items[1].subColor1 = TFT_CYAN;
+    items[1].subText2 = "11:22:33:44:55:66";
+    items[1].subColor2 = TFT_MAGENTA;
+
+    items[2].mainText = "BLE Device 3";
+    items[2].mainColor = TFT_WHITE;
+    items[2].subText1 = "-82 dBm";
+    items[2].subColor1 = TFT_CYAN;
+    items[2].subText2 = "AA:11:BB:22:CC:33";
+    items[2].subColor2 = TFT_MAGENTA;
+
+    bleList->setBrowsing(items, 3);
+    bleScanInProgress = true;
+    return;
   }
 
-  if (Cardputer.Keyboard.isKeyPressed('/')) {
-    currNetwork++;
-    if (currNetwork >= n) {
-      currNetwork = 0;
-    }
-    needsRedraw = true;
+  // Handle input and check for exit
+  if (bleList->handleInput()) {
+    isInSubMenu = false;
+    drawMenu();
+    return;
   }
 
-  if (Cardputer.Keyboard.isKeyPressed(',')) {
-    currNetwork--;
-    if (currNetwork < 0) {
-      currNetwork = n - 1;
-    }
-    needsRedraw = true;
-  }
-
-  if (needsRedraw) {
-    clearScrn();
-
-    if (n == 0) {
-      Cardputer.Display.setTextDatum(MC_DATUM);
-      Cardputer.Display.setTextColor(TFT_WHITE);
-      Cardputer.Display.drawString("no networks found", w / 2, h / 2);
-    } else {
-      String ssid = WiFi.SSID(currNetwork);
-      int32_t rssi = WiFi.RSSI(currNetwork);
-      wifi_auth_mode_t encryption = WiFi.encryptionType(currNetwork);
-
-      String securityType;
-      if (encryption == WIFI_AUTH_OPEN) {
-        securityType = "Open";
-      } else if (encryption == WIFI_AUTH_WEP) {
-        securityType = "WEP";
-      } else if (encryption == WIFI_AUTH_WPA_PSK) {
-        securityType = "WPA";
-      } else if (encryption == WIFI_AUTH_WPA2_PSK) {
-        securityType = "WPA2";
-      } else if (encryption == WIFI_AUTH_WPA_WPA2_PSK) {
-        securityType = "WPA/WPA2";
-      } else {
-        securityType = "WPA3";
-      }
-
-      String strength = String(rssi) + " dBm";
-      drawBattery();
-
-      Cardputer.Display.setTextColor(TFT_WHITE);
-      Cardputer.Display.setTextDatum(MC_DATUM);
-      Cardputer.Display.drawString(ssid, w / 2, h / 2 - 20);
-
-      Cardputer.Display.setTextColor(TFT_CYAN);
-      Cardputer.Display.drawString(strength, w / 2, h / 2);
-
-      Cardputer.Display.setTextColor(TFT_MAGENTA);
-      Cardputer.Display.drawString(securityType, w / 2, h / 2 + 20);
-
-      int dotY = h - 20;
-      int dotSpacing = 15;
-      int startX = (w / 2) - ((n - 1) * dotSpacing / 2);
-      if (n > 10) {
-        startX = (w / 2) - (9 * dotSpacing / 2);
-      }
-
-      int dotsToShow = n > 10 ? 10 : n;
-      for (int i = 0; i < dotsToShow; i++) {
-        int dotX = startX + (i * dotSpacing);
-        uint16_t color;
-        if (i == currNetwork) {
-          color = TFT_PURPLE;
-          Cardputer.Display.fillCircle(dotX, dotY, 4, color);
-        } else {
-          color = TFT_DARKGREY;
-          Cardputer.Display.fillCircle(dotX, dotY, 2, color);
-        }
-      }
-    }
-
-    needsRedraw = false;
-  }
+  // Draw current state
+  bleList->draw();
 }
 
-void handleOptions() {}
-
-void resetWiFiScanState() {
-  scanned = false;
-  n = 0;
-  currNetwork = 0;
+void handleOptions() {
+  // TODO: Implement options menu
 }
-// DATUM OPTIONS
-// TL_DATUM - Top Left (x=0, y=0)
-// TC_DATUM - Top Center (x=w/2, y=0)
-// TR_DATUM - Top Right (x=w, y=0)
-// ML_DATUM - Middle Left (x=0, y=h/2)
-// MC_DATUM - Middle Center (x=w/2, y=h/2)
-// MR_DATUM - Middle Right (x=w, y=h/2)
-// BL_DATUM - Bottom Left (x=0, y=h)
-// BC_DATUM - Bottom Center (x=w/2, y=h)
-// BR_DATUM - Bottom Right (x=w, y=h)

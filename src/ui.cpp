@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "globals.h"
+#include "utils.h"
 
 esp_err_t res;
 
@@ -77,14 +78,13 @@ void drawMenu() {
   }
 }
 
-void clearScrn() { Cardputer.Display.fillScreen(TFT_BLACK); }
-
 void drawBattery() {
   int w = Cardputer.Display.width();
+  Cardputer.Display.setTextSize(1);
   int batteryInt = Cardputer.Power.getBatteryLevel();
   String battery = String(batteryInt) + "%";
   if (batteryInt >= 80) {
-    Cardputer.Display.setTextColor(TFT_CYAN);
+    Cardputer.Display.setTextColor(TFT_WHITE);
   } else if (batteryInt >= 50) {
     Cardputer.Display.setTextColor(TFT_MAGENTA);
   } else {
@@ -93,4 +93,8 @@ void drawBattery() {
 
   Cardputer.Display.setTextDatum(TR_DATUM);
   Cardputer.Display.drawString(battery, w - 10, 10);
+  int textsize = Cardputer.Display.height() / 60;
+  if (textsize == 0)
+    textsize = 1;
+  Cardputer.Display.setTextSize(textsize);
 }
