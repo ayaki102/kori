@@ -1,3 +1,4 @@
+
 #include "BLEDevice.h"
 #include "BLEScan.h"
 #include "BLEUtils.h"
@@ -5,22 +6,17 @@
 #include "WiFi.h"
 #include "esp_wifi.h"
 #include "globals.h"
-#include "menu_system.h"
 #include "ui.h"
 #include "utils.h"
 
 void handleMenu();
 void handleWiFiScan();
-void handleBLEScan();
 void handleOptions();
+void resetWiFiScanState();
 
-// WiFi scanning globals
-ScrollableList *wifiList = nullptr;
-bool wifiScanInProgress = false;
-
-// BLE scanning globals (for future use)
-ScrollableList *bleList = nullptr;
-bool bleScanInProgress = false;
+int currNetwork = 0;
+bool scanned = false;
+int n = 0;
 
 void setup() {
   auto cfg = M5.config();
@@ -57,8 +53,6 @@ void loop() {
         drawMenu();
       } else if (selectedItem == MenuItem::WIFI_SCAN) {
         handleWiFiScan();
-      } else if (selectedItem == MenuItem::BLE_SCAN) {
-        handleBLEScan();
       } else if (selectedItem == MenuItem::OPTIONS) {
         handleOptions();
       }
@@ -93,25 +87,9 @@ void handleMenu() {
   }
   if (isKeyPressed(KEY_ENTER)) {
     isInSubMenu = true;
-
     if (selectedItem == MenuItem::WIFI_SCAN) {
-      // Initialize WiFi list if needed
-      if (wifiList == nullptr) {
-        wifiList = new ScrollableList("Scanning WiFi...", "Selected Network",
-                                      "No networks found", "[r]escan  [e]xit");
-      }
-      wifiList->reset();
-      wifiScanInProgress = false;
+      resetWiFiScanState();
       handleWiFiScan();
-    } else if (selectedItem == MenuItem::BLE_SCAN) {
-      // Initialize BLE list if needed
-      if (bleList == nullptr) {
-        bleList = new ScrollableList("Scanning BLE...", "Selected Device",
-                                     "No devices found", "[r]escan  [e]xit");
-      }
-      bleList->reset();
-      bleScanInProgress = false;
-      handleBLEScan();
     } else if (selectedItem == MenuItem::OPTIONS) {
       handleOptions();
     }
@@ -119,112 +97,204 @@ void handleMenu() {
 }
 
 void handleWiFiScan() {
-  if (wifiList == nullptr)
+  // Use enum for clearer state management
+  enum ScanState { SCANNING, BROWSING, SELECTED };
+  static ScanState state = SCANNING;
+  static String selectedSSID = "";
+  static bool needsRedraw = true;
+
+  // Check if we just entered (scanned will be false from reset)
+  if (!scanned && state != SCANNING) {
+    state = SCANNING;
+    needsRedraw = true;
+  }
+
+  int w = Cardputer.Display.width();
+  int h = Cardputer.Display.height();
+
+  // STATE: SELECTED NETWORK
+  if (state == SELECTED) {
+    if (needsRedraw) {
+      clearScrn();
+      drawBattery();
+      Cardputer.Display.setTextColor(TFT_CYAN);
+      Cardputer.Display.setTextDatum(MC_DATUM);
+      Cardputer.Display.drawString("Selected Network", w / 2, 20);
+
+      Cardputer.Display.setTextColor(TFT_WHITE);
+      if (M5Cardputer.Display.textWidth(selectedSSID) > w - 2) {
+        int len = selectedSSID.length();
+        int mid = len / 2;
+        String top = selectedSSID.substring(0, mid);
+        String bottom = selectedSSID.substring(mid);
+        Cardputer.Display.drawString(top, w / 2, h / 2 - 10);
+        Cardputer.Display.drawString(bottom, w / 2, h / 2 + 10);
+      } else {
+        Cardputer.Display.drawString(selectedSSID, w / 2, h / 2);
+      }
+
+      Cardputer.Display.setTextColor(TFT_DARKGREY);
+      Cardputer.Display.drawString("[r]escan  [e]xit", w / 2, h - 20);
+      needsRedraw = false;
+    }
+
+    if (isKeyPressed('r') || isKeyPressed('R') || isKeyPressed(KEY_ENTER)) {
+      state = SCANNING;
+      selectedSSID = "";
+      scanned = false;
+      currNetwork = 0;
+      needsRedraw = true;
+    }
+
+    if (isKeyPressed('e') || isKeyPressed('E') || isKeyPressed(KEY_BACKSPACE)) {
+      isInSubMenu = false;
+      drawMenu();
+    }
     return;
+  }
 
-  // Handle scanning state
-  if (wifiList->getState() == LIST_SCANNING && !wifiScanInProgress) {
-    wifiList->drawScanning();
+  // STATE: SCANNING
+  if (state == SCANNING && !scanned) {
+    clearScrn();
+    Cardputer.Display.setTextColor(TFT_WHITE);
+    Cardputer.Display.setTextDatum(MC_DATUM);
+    Cardputer.Display.drawString("Scanning...", w / 2, h / 2);
 
-    // Perform the actual WiFi scan
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
-    int n = WiFi.scanNetworks(false, true);
+    n = WiFi.scanNetworks(false, true);
+    scanned = true;
+    currNetwork = 0;
+    state = BROWSING;
+    needsRedraw = true;
+    return;
+  }
 
-    // Create list items from scan results
-    ListItem *items = new ListItem[n];
-    for (int i = 0; i < n; i++) {
-      items[i].mainText = WiFi.SSID(i);
-      items[i].mainColor = TFT_WHITE;
-
-      // Signal strength
-      items[i].subText1 = String(WiFi.RSSI(i)) + " dBm";
-      items[i].subColor1 = TFT_CYAN;
-
-      // Security type
-      wifi_auth_mode_t encryption = WiFi.encryptionType(i);
-      if (encryption == WIFI_AUTH_OPEN) {
-        items[i].subText2 = "Open";
-      } else if (encryption == WIFI_AUTH_WEP) {
-        items[i].subText2 = "WEP";
-      } else if (encryption == WIFI_AUTH_WPA_PSK) {
-        items[i].subText2 = "WPA";
-      } else if (encryption == WIFI_AUTH_WPA2_PSK) {
-        items[i].subText2 = "WPA2";
-      } else if (encryption == WIFI_AUTH_WPA_WPA2_PSK) {
-        items[i].subText2 = "WPA/WPA2";
-      } else {
-        items[i].subText2 = "WPA3";
-      }
-      items[i].subColor2 = TFT_MAGENTA;
+  // STATE: BROWSING NETWORKS
+  if (state == BROWSING) {
+    // Handle rescan
+    if (isKeyPressed('r') || isKeyPressed('R')) {
+      state = SCANNING;
+      scanned = false;
+      currNetwork = 0;
+      needsRedraw = true;
+      return;
     }
 
-    wifiList->setBrowsing(items, n);
-    wifiScanInProgress = true;
-    return;
-  }
+    // Handle navigation
+    if (isKeyPressed('/')) {
+      currNetwork++;
+      if (currNetwork >= n) {
+        currNetwork = 0;
+      }
+      needsRedraw = true;
+    }
 
-  // Handle input and check for exit
-  if (wifiList->handleInput()) {
-    isInSubMenu = false;
-    drawMenu();
-    return;
-  }
+    if (isKeyPressed(',')) {
+      currNetwork--;
+      if (currNetwork < 0) {
+        currNetwork = n - 1;
+      }
+      needsRedraw = true;
+    }
 
-  // Draw current state
-  wifiList->draw();
+    // Handle selection
+    if (isKeyPressed(KEY_ENTER) && n > 0) {
+      selectedSSID = WiFi.SSID(currNetwork);
+      state = SELECTED;
+      needsRedraw = true;
+      return;
+    }
+
+    // Draw network list
+    if (needsRedraw) {
+      clearScrn();
+      if (n == 0) {
+        Cardputer.Display.setTextDatum(MC_DATUM);
+        Cardputer.Display.setTextColor(TFT_WHITE);
+        Cardputer.Display.drawString("no networks found", w / 2, h / 2);
+      } else {
+        String ssid = WiFi.SSID(currNetwork);
+        int32_t rssi = WiFi.RSSI(currNetwork);
+        wifi_auth_mode_t encryption = WiFi.encryptionType(currNetwork);
+
+        String securityType;
+        if (encryption == WIFI_AUTH_OPEN) {
+          securityType = "Open";
+        } else if (encryption == WIFI_AUTH_WEP) {
+          securityType = "WEP";
+        } else if (encryption == WIFI_AUTH_WPA_PSK) {
+          securityType = "WPA";
+        } else if (encryption == WIFI_AUTH_WPA2_PSK) {
+          securityType = "WPA2";
+        } else if (encryption == WIFI_AUTH_WPA_WPA2_PSK) {
+          securityType = "WPA/WPA2";
+        } else {
+          securityType = "WPA3";
+        }
+
+        String strength = String(rssi) + " dBm";
+        drawBattery();
+        Cardputer.Display.setTextColor(TFT_WHITE);
+        Cardputer.Display.setTextDatum(MC_DATUM);
+
+        if (M5Cardputer.Display.textWidth(ssid) > w - 2) {
+          int len = ssid.length();
+          int mid = len / 2;
+          String top = ssid.substring(0, mid);
+          String bottom = ssid.substring(mid);
+          Cardputer.Display.drawString(top, w / 2, h / 2 - 40);
+          Cardputer.Display.drawString(bottom, w / 2, h / 2 - 20);
+        } else {
+          Cardputer.Display.drawString(ssid, w / 2, h / 2 - 20);
+        }
+
+        Cardputer.Display.setTextColor(TFT_CYAN);
+        Cardputer.Display.drawString(strength, w / 2, h / 2);
+        Cardputer.Display.setTextColor(TFT_MAGENTA);
+        Cardputer.Display.drawString(securityType, w / 2, h / 2 + 20);
+
+        int dotY = h - 20;
+        int dotSpacing = 15;
+        int startX = (w / 2) - ((n - 1) * dotSpacing / 2);
+        if (n > 10) {
+          startX = (w / 2) - (9 * dotSpacing / 2);
+        }
+
+        int dotsToShow = n > 10 ? 10 : n;
+        for (int i = 0; i < dotsToShow; i++) {
+          int dotX = startX + (i * dotSpacing);
+          uint16_t color;
+          if (i == currNetwork) {
+            color = TFT_PURPLE;
+            Cardputer.Display.fillCircle(dotX, dotY, 4, color);
+          } else {
+            color = TFT_DARKGREY;
+            Cardputer.Display.fillCircle(dotX, dotY, 2, color);
+          }
+        }
+      }
+      needsRedraw = false;
+    }
+  }
 }
 
-void handleBLEScan() {
-  if (bleList == nullptr)
-    return;
-
-  // Handle scanning state
-  if (bleList->getState() == LIST_SCANNING && !bleScanInProgress) {
-    bleList->drawScanning();
-
-    // TODO: Perform the actual BLE scan
-    // For now, just create dummy data as an example
-    ListItem *items = new ListItem[3];
-
-    items[0].mainText = "BLE Device 1";
-    items[0].mainColor = TFT_WHITE;
-    items[0].subText1 = "-45 dBm";
-    items[0].subColor1 = TFT_CYAN;
-    items[0].subText2 = "AA:BB:CC:DD:EE:FF";
-    items[0].subColor2 = TFT_MAGENTA;
-
-    items[1].mainText = "BLE Device 2";
-    items[1].mainColor = TFT_WHITE;
-    items[1].subText1 = "-67 dBm";
-    items[1].subColor1 = TFT_CYAN;
-    items[1].subText2 = "11:22:33:44:55:66";
-    items[1].subColor2 = TFT_MAGENTA;
-
-    items[2].mainText = "BLE Device 3";
-    items[2].mainColor = TFT_WHITE;
-    items[2].subText1 = "-82 dBm";
-    items[2].subColor1 = TFT_CYAN;
-    items[2].subText2 = "AA:11:BB:22:CC:33";
-    items[2].subColor2 = TFT_MAGENTA;
-
-    bleList->setBrowsing(items, 3);
-    bleScanInProgress = true;
-    return;
-  }
-
-  // Handle input and check for exit
-  if (bleList->handleInput()) {
-    isInSubMenu = false;
-    drawMenu();
-    return;
-  }
-
-  // Draw current state
-  bleList->draw();
+void resetWiFiScanState() {
+  scanned = false;
+  n = 0;
+  currNetwork = 0;
 }
 
-void handleOptions() {
-  // TODO: Implement options menu
-}
+void handleOptions() {}
+
+// DATUM OPTIONS
+// TL_DATUM - Top Left (x=0, y=0)
+// TC_DATUM - Top Center (x=w/2, y=0)
+// TR_DATUM - Top Right (x=w, y=0)
+// ML_DATUM - Middle Left (x=0, y=h/2)
+// MC_DATUM - Middle Center (x=w/2, y=h/2)
+// MR_DATUM - Middle Right (x=w, y=h/2)
+// BL_DATUM - Bottom Left (x=0, y=h)
+// BC_DATUM - Bottom Center (x=w/2, y=h)
+// BR_DATUM - Bottom Right (x=w, y=h)
